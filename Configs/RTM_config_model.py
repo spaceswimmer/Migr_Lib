@@ -6,7 +6,7 @@ original: Оригинальный скрипт - нету residual, нужно 
 real: Случай для реальных данных - есть residual (поле отраженных волн), нужно считать только u0
 model: Случай для модельных данных - нету residual, но есть true_d, нужно посчитать smooth_d, u0, после чего можно вычислить residual
 """
-preset = "real"
+preset = "model"
 
 #для чтения файла модели
 NT = 467 #int(sys.argv[1])
@@ -84,3 +84,5 @@ elif preset == "real":
     rec = np.empty((nreceivers, 2))
     rec[:, 0] = 4000.
     rec[:, 1] = csg_rec_z
+elif preset == "model":
+    

@@ -13,6 +13,7 @@ import numpy as np
 import copy
 import gc
 from tqdm import tqdm
+from time import time
 from devito import gaussian_smooth, TimeFunction, Eq, Operator, solve, Function
 from util import *
 from examples.seismic import SeismicModel, AcquisitionGeometry, PointSource, Receiver, TimeAxis
@@ -52,6 +53,7 @@ def ImagingOperator(model, image):
                     subs=model.spacing_map)
 
 if __name__ == "__main__":
+    begin = time()
     model_vp, xx, zz = readin_bin(model_param['path'], seek_num=0, nt=NT, nr=NR, dx=10, dz=10)
     
     model = SeismicModel(vp = model_vp.T/1000,
@@ -65,9 +67,12 @@ if __name__ == "__main__":
     model0 = copy.deepcopy(model)
     gaussian_smooth(model0.vp, sigma=model_param['filter'])
 
+    src_coordinates = np.empty((1, 2))
+    src_coordinates[0, :] = np.array(model.domain_size) * .5
+    src_coordinates[0, -1] = 20.  # Depth is 20m
     geometry = AcquisitionGeometry(model, 
                                    rec, 
-                                   src, 
+                                   src_coordinates, 
                                    t0, 
                                    tn, 
                                    f0=f0, 
@@ -75,8 +80,10 @@ if __name__ == "__main__":
     
     image = Function(name='image', grid=model.grid)
     op_imaging = ImagingOperator(model, image)
-
+    end = time()
+    print('Model creation finished in:', end-begin ,'sec')
     
+    begin=time()
     match preset:
         case "original":
             solver = AcousticWaveSolver(model, geometry, space_order=4)
@@ -112,17 +119,13 @@ if __name__ == "__main__":
             image = Function(name='image', grid=model.grid)
             op_imaging = ImagingOperator(model, image)
 
-            source_locations = np.empty((nshots, 2), dtype=np.float32)
-            source_locations[:, 0] = np.unique(sou_x)
-            source_locations[:, 1] = 0.
-
             for i in range(nshots):
                 print('Imaging source %d out of %d' % (i+1, nshots))
                 idx = sou_x == np.unique(sou_x)[i] # В моем скрипте sou_x в одиночку определял ансамбль
                 csg_ensemble = data[idx, :]
                 csg_rec_z = rec_z[idx]
                 # Update source location
-                geometry.src_positions[0, :] = source_locations[i, :]
+                geometry.src_positions[0, :] = src[i, :]
 
                 # Вызов для модельных данных
                 # true_d, _, _ = solver.forward(vp=model.vp)
@@ -159,6 +162,60 @@ if __name__ == "__main__":
                 # del v, real_data, smooth_d, u0
                 # del v, u0 # ХЗ работает ли эта фигня
                 gc.collect() # Вот эта фигня точно ускоряет процесс
-            np.save('Results/images.npy', images)
+
+        case "model":
+            solver = AcousticWaveSolver(model, geometry, space_order=4)
+
+            images = []
+            image = Function(name='image', grid=model.grid)
+            op_imaging = ImagingOperator(model, image)
+
+            for i in range(nshots):
+                print('Imaging source %d out of %d' % (i+1, nshots))
+                
+                idx = sou_x == np.unique(sou_x)[i] # В моем скрипте sou_x в одиночку определял ансамбль
+                csg_ensemble = data[idx, :]
+                csg_rec_z = rec_z[idx]
+                # Update source location
+                geometry.src_positions[0, :] = src[i, :]
+
+                # Вызов для модельных данных
+                # true_d, _, _ = solver.forward(vp=model.vp)
+                
+                # Вызов для модельных данных
+                smooth_d, u0, _ = solver.forward(vp=model0.vp, save=True)
+
+                # Вызов для реальных данных - smooth_d не нужен
+                # _, u0, _ = solver.forward(vp=model0.vp, save=True)
+                
+                # Compute gradient from the data residual  
+                v = TimeFunction(name='v', grid=model.grid, time_order=2, space_order=4)
+
+
+                # Receiver нужен чисто для того, чтобы создать объект data.data
+                real_data = Receiver(name='rec', grid=model.grid,
+                        time_range=TimeAxis(start=t0, step=samples[1], num=samples.size), npoint=nreceivers,
+                        coordinates=rec)
+                real_data.data[:] = csg_ensemble.T
+                real_data = real_data.resample(model.critical_dt)
+
+                # Вызов для реальных данных - резидуал здесь это сразу поле отраженных волн
+                op_imaging(u=u0, v=v, vp=model0.vp, dt=model0.critical_dt, 
+                        residual=smooth_d.data - real_data.data)
+
+                # Вызов для модельных данных
+                # op_imaging(u=u0, v=v, vp=model0.vp, dt=model0.critical_dt, 
+                #            residual=true_d.data-smooth_d.data)
+
+
+                # Немного поменял исходный скрипт, чтобы можно было смотреть имейджи от отдельных шотов
+                images.append(np.array(image.data))
+                image.data.fill(0.)
+                # del v, real_data, smooth_d, u0
+                # del v, u0 # ХЗ работает ли эта фигня
+                gc.collect() # Вот эта фигня точно ускоряет процесс
+    np.save('Results/images.npy', images)
+    end=time()
+    print('Modeling finished in:', end-begin, 'sec')
 
         

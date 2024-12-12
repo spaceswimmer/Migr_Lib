@@ -1,0 +1,7 @@
+#Ignore folders
+.venv/
+Results/
+Data/Meshdurechenskaya/
+
+#Ignore files
+.ipynb_checkpoints
