@@ -7,7 +7,7 @@ This is a python script for executing convinient RTM migration
 Please use "RTM_config.py" to configure parameters for it. 
 If you create an additional config file, import it with the line below
 """
-from Configs.RTM_config_model import *
+from Configs.RTM_config import *
 
 import numpy as np
 import copy
