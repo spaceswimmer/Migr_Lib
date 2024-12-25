@@ -7,11 +7,12 @@ This is a python script for executing convinient RTM migration
 Please use "RTM_config.py" to configure parameters for it. 
 If you create an additional config file, import it with the line below
 """
-from Configs.RTM_config import *
+from Configs.RTM_config_model import *
 
 import numpy as np
 import copy
 import gc
+import glob
 from tqdm import tqdm
 from time import time
 from devito import gaussian_smooth, TimeFunction, Eq, Operator, solve, Function
@@ -54,9 +55,8 @@ def ImagingOperator(model, image):
 
 if __name__ == "__main__":
     begin = time()
-    model_vp, xx, zz = readin_bin(model_param['path'], seek_num=0, nt=NT, nr=NR, dx=10, dz=10)
     
-    model = SeismicModel(vp = model_vp.T/1000,
+    model = SeismicModel(vp = model_vp.T,
                          origin = model_param['origin'], 
                          shape = model_vp.T.shape, 
                          spacing = model_param['spacing'],
@@ -141,15 +141,15 @@ if __name__ == "__main__":
 
 
                 # Receiver нужен чисто для того, чтобы создать объект data.data
-                real_data = Receiver(name='rec', grid=model.grid,
+                real_d = Receiver(name='rec', grid=model.grid,
                         time_range=TimeAxis(start=t0, step=samples[1], num=samples.size), npoint=nreceivers,
                         coordinates=rec)
-                real_data.data[:] = csg_ensemble.T
-                real_data = real_data.resample(model.critical_dt)
+                real_d.data[:] = csg_ensemble.T
+                real_d = real_d.resample(model.critical_dt)
 
                 # Вызов для реальных данных - резидуал здесь это сразу поле отраженных волн
                 op_imaging(u=u0, v=v, vp=model0.vp, dt=model0.critical_dt, 
-                        residual=real_data.data)
+                        residual=real_d.data)
 
                 # Вызов для модельных данных
                 # op_imaging(u=u0, v=v, vp=model0.vp, dt=model0.critical_dt, 
@@ -159,7 +159,7 @@ if __name__ == "__main__":
                 # Немного поменял исходный скрипт, чтобы можно было смотреть имейджи от отдельных шотов
                 images.append(np.array(image.data))
                 image.data.fill(0.)
-                # del v, real_data, smooth_d, u0
+                # del v, real_d, smooth_d, u0
                 # del v, u0 # ХЗ работает ли эта фигня
                 gc.collect() # Вот эта фигня точно ускоряет процесс
 
@@ -170,48 +170,54 @@ if __name__ == "__main__":
             image = Function(name='image', grid=model.grid)
             op_imaging = ImagingOperator(model, image)
 
+            reg = glob.glob(model_param['res_path'][0]+'/*.sgy')
+            smth = glob.glob(model_param['res_path'][1]+'/*.sgy')
             for i in range(nshots):
                 print('Imaging source %d out of %d' % (i+1, nshots))
-                
-                idx = sou_x == np.unique(sou_x)[i] # В моем скрипте sou_x в одиночку определял ансамбль
-                csg_ensemble = data[idx, :]
-                csg_rec_z = rec_z[idx]
-                # Update source location
-                geometry.src_positions[0, :] = src[i, :]
 
-                # Вызов для модельных данных
-                # true_d, _, _ = solver.forward(vp=model.vp)
-                
-                # Вызов для модельных данных
-                smooth_d, u0, _ = solver.forward(vp=model0.vp, save=True)
+                regular = segyio.open(reg[i], mode='r', endian='big', ignore_geometry=True)
+                regular_data = segyio.tools.collect(regular.trace[:])
+                samples = regular.samples
+                sou_x = regular.attributes(segyio.TraceField.SourceX)[:]
+                regular.close()
+
+                smooth = segyio.open(smth[i], mode='r', endian='big', ignore_geometry=True)
+                smooth_data = segyio.tools.collect(smooth.trace[:])
+                smooth.close()
+
+                # Update source location
+                geometry.src_positions[:, 0] = np.unique(sou_x)
+                geometry.src_positions[:, 1] = 0
 
                 # Вызов для реальных данных - smooth_d не нужен
-                # _, u0, _ = solver.forward(vp=model0.vp, save=True)
+                _, u0, _ = solver.forward(vp=model0.vp, save=True)
                 
                 # Compute gradient from the data residual  
                 v = TimeFunction(name='v', grid=model.grid, time_order=2, space_order=4)
 
-
                 # Receiver нужен чисто для того, чтобы создать объект data.data
-                real_data = Receiver(name='rec', grid=model.grid,
-                        time_range=TimeAxis(start=t0, step=samples[1], num=samples.size), npoint=nreceivers,
+                real_d = Receiver(name='rec1', grid=model.grid,
+                        time_range=TimeAxis(start=t0, step=samples[1], num=samples.size), npoint=nrec,
                         coordinates=rec)
-                real_data.data[:] = csg_ensemble.T
-                real_data = real_data.resample(model.critical_dt)
+                real_d.data[:] = regular_data.T
+                real_d = real_d.resample(model.critical_dt)
 
+                # То же самое для smooth
+                smooth_d = Receiver(name='rec2', grid=model.grid,
+                        time_range=TimeAxis(start=t0, step=samples[1], num=samples.size), npoint=nrec,
+                        coordinates=rec)
+                smooth_d.data[:] = smooth_data.T
+                smooth_d = smooth_d.resample(model.critical_dt)
+
+                print(real_d.data.shape)
                 # Вызов для реальных данных - резидуал здесь это сразу поле отраженных волн
-                op_imaging(u=u0, v=v, vp=model0.vp, dt=model0.critical_dt, 
-                        residual=smooth_d.data - real_data.data)
-
-                # Вызов для модельных данных
                 # op_imaging(u=u0, v=v, vp=model0.vp, dt=model0.critical_dt, 
-                #            residual=true_d.data-smooth_d.data)
-
+                #         residual=smooth_d.data - real_d.data)
 
                 # Немного поменял исходный скрипт, чтобы можно было смотреть имейджи от отдельных шотов
                 images.append(np.array(image.data))
                 image.data.fill(0.)
-                # del v, real_data, smooth_d, u0
+                # del v, real_d, smooth_d, u0
                 # del v, u0 # ХЗ работает ли эта фигня
                 gc.collect() # Вот эта фигня точно ускоряет процесс
     np.save('Results/images.npy', images)
