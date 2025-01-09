@@ -7,7 +7,7 @@ This is a python script for executing convinient RTM migration
 Please use "RTM_config.py" to configure parameters for it. 
 If you create an additional config file, import it with the line below
 """
-from Configs.RTM_config import *
+from Configs.RTM_config_model import *
 
 import numpy as np
 import copy
@@ -170,16 +170,20 @@ if __name__ == "__main__":
             image = Function(name='image', grid=model.grid)
             op_imaging = ImagingOperator(model, image)
 
-            reg = glob.glob(model_param['res_path'][0]+'/*.sgy')
-            smth = glob.glob(model_param['res_path'][1]+'/*.sgy')
-            for i in range(nshots):
+            reg = sorted(glob.glob(model_param['res_path'][0]+'/*.sgy'))
+            smth = sorted(glob.glob(model_param['res_path'][1]+'/*.sgy'))
+            assert len(reg) == len(smth), 'Разное количество сглаженных и несглаженных сейсмограмм'
+            for i in range(2): #nshots
                 print('Imaging source %d out of %d' % (i+1, nshots))
 
                 regular = segyio.open(reg[i], mode='r', endian='big', ignore_geometry=True)
                 regular_data = segyio.tools.collect(regular.trace[:])
                 samples = regular.samples
-                sou_x = regular.attributes(segyio.TraceField.SourceX)[:]
+                sou_x = regular.attributes(segyio.TraceField.SourceX)[:]/100
                 regular.close()
+
+                print(sou_x)
+                print(geometry.rec_positions)
 
                 smooth = segyio.open(smth[i], mode='r', endian='big', ignore_geometry=True)
                 smooth_data = segyio.tools.collect(smooth.trace[:])
@@ -199,20 +203,26 @@ if __name__ == "__main__":
                 real_d = Receiver(name='rec1', grid=model.grid,
                         time_range=TimeAxis(start=t0, step=samples[1], num=samples.size), npoint=nrec,
                         coordinates=rec)
-                real_d.data[:] = regular_data.T
+                real_d.data[:] = (smooth_data - regular_data).T
                 real_d = real_d.resample(model.critical_dt)
 
+                # fig, axs = plt.subplots(1, 3 ,figsize=(5,10))
+                # axs[0].imshow(smooth_data, aspect='auto', vmin=-1e-6, vmax = 1e-6, )
+                # axs[1].imshow(regular_data, aspect='auto', vmin=-1e-6, vmax = 1e-6,)
+                # axs[2].imshow(smooth_data-regular_data, aspect='auto', vmin=-1e-6, vmax = 1e-6,)
+                # plt.show()
                 # То же самое для smooth
-                smooth_d = Receiver(name='rec2', grid=model.grid,
-                        time_range=TimeAxis(start=t0, step=samples[1], num=samples.size), npoint=nrec,
-                        coordinates=rec)
-                smooth_d.data[:] = smooth_data.T
-                smooth_d = smooth_d.resample(model.critical_dt)
+                # smooth_d = Receiver(name='rec2', grid=model.grid,
+                #         time_range=TimeAxis(start=t0, step=samples[1], num=samples.size), npoint=nrec,
+                #         coordinates=rec)
+                # smooth_d.data[:] = smooth_data.T
+                # smooth_d = smooth_d.resample(model.critical_dt)
 
-                print(real_d.data.shape)
+                # print(real_d.data.shape)
+                # print(smooth_d.data.shape)
                 # Вызов для реальных данных - резидуал здесь это сразу поле отраженных волн
-                # op_imaging(u=u0, v=v, vp=model0.vp, dt=model0.critical_dt, 
-                #         residual=smooth_d.data - real_d.data)
+                op_imaging(u=u0, v=v, vp=model0.vp, dt=model0.critical_dt, 
+                        residual=real_d.data)
 
                 # Немного поменял исходный скрипт, чтобы можно было смотреть имейджи от отдельных шотов
                 images.append(np.array(image.data))
@@ -220,7 +230,7 @@ if __name__ == "__main__":
                 # del v, real_d, smooth_d, u0
                 # del v, u0 # ХЗ работает ли эта фигня
                 gc.collect() # Вот эта фигня точно ускоряет процесс
-    np.save('Results/images.npy', images)
+    np.save('Results/RTM_'+preset+'_images.npy', images)
     end=time()
     print('Modeling finished in:', end-begin, 'sec')
 

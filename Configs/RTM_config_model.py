@@ -102,11 +102,15 @@ elif preset == "real":
 elif preset == "model":
     #Скорости
     model_vp = np.load(model_param['path'])
-
     src = segyio.open(model_param['res_path'][0]+'/2d_vankor_SRC-0.sgy')
+    samples = src.samples
     sou_x = src.attributes(segyio.TraceField.SourceX)[:]/src.attributes(segyio.TraceField.SourceGroupScalar)
     rec_x = src.attributes(segyio.TraceField.GroupX)[:]
     src.close()
+    #время моделирования из сейсмограмм
+    t0=samples[0]
+    tn=samples[-1]
+    f0=.025
 
     #Геометрия
     nrec = np.unique(rec_x).size
