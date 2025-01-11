@@ -1,5 +1,11 @@
+import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__),'../'))
+
 import numpy as np
 import segyio
+import glob
+from util import *
 import matplotlib.pyplot as plt
 """
 original: Оригинальный скрипт - нету residual, нужно считать true_d, smooth_d, u0
@@ -40,7 +46,7 @@ tn=3001.
 f0=.015
 
 """
-геометрия моделирования
+геометрия моделирования обычно из сегваев
 -----------------------
 _nsrc: количество источников
 src: расположение источников
@@ -48,8 +54,12 @@ _nrec: количество приемников
 rec: расположение приемников
 """
 
-#дальше не трогать
 if preset == "original":
+    #Скорости
+    model_vp, xx, zz = readin_bin(model_param['path'], seek_num=0, nt=NT, nr=NR, dx=10, dz=10)
+    model_vp = model_vp/1000
+    
+    #Геометрия
     nshots = 30
     src = np.empty((nshots, 2))
     src[:, 0] = np.linspace(2000,6000,nshots)
@@ -61,6 +71,10 @@ if preset == "original":
     rec[:,1] = 0.
 
 elif preset == "real":
+    #Скорости
+    model_vp, _, _ = readin_bin(model_param['path'], seek_num=0, nt=NT, nr=NR, dx=10, dz=10)
+    model_vp = model_vp/1000
+
     #Подгрузка поля отраженных волн
     src = segyio.open(model_param['res_path'], mode='r', endian='big', ignore_geometry=True)
     samples = src.samples
@@ -71,9 +85,9 @@ elif preset == "real":
     rec_z = src.attributes(segyio.TraceField.ReceiverGroupElevation)[:]
     src.close()
 
+    #Геометрия
     nreceivers = np.unique(rec_z).size
     nshots = np.unique(sou_x).size
-
     idx = sou_x == np.unique(sou_x)[10]
     csg_rec_z = rec_z[idx]
 
@@ -84,3 +98,21 @@ elif preset == "real":
     rec = np.empty((nreceivers, 2))
     rec[:, 0] = 4000.
     rec[:, 1] = csg_rec_z
+elif preset == "model":
+    #Скорости
+    model_vp = np.load(model_param['path'])
+
+    src = segyio.open(model_param['res_path'][0]+'/2d_vankor_SRC-0.sgy')
+    sou_x = src.attributes(segyio.TraceField.SourceX)[:]/src.attributes(segyio.TraceField.SourceGroupScalar)
+    rec_x = src.attributes(segyio.TraceField.GroupX)[:]
+    src.close()
+
+    #Геометрия
+    nrec = np.unique(rec_x).size
+    rec = np.empty((nrec, 2))
+    rec[:, 0] = rec_x
+    rec[:, 1] = 0
+
+    nshots = len(glob.glob(model_param['res_path'][0]+'/*.sgy'))
+
+    # print(model_vp)
